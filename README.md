@@ -23,9 +23,9 @@ Infraestructura reproducible con Terraform que despliega el Portal Operacional e
 │   └── portal_azure/     # RG, VNet, subred, NSG, IP pública, NIC, VM Linux
 ├── scripts/
 │   ├── observar_http.sh       # muestra /api/check cada 2 s, timeout 5 s, sin reintentos
-│   ├── observar_capacidad.sh  # ASG, Instance Refresh y destinos cada 20 s
+│   ├── observar_capacidad.sh  # grupos EC2 y destinos cada 20 s
 │   ├── analizar_ventana.sh    # apoyo: cobertura, brechas y fallos de la ventana
-│   └── esperar_refresh.sh     # pipeline: espera el resultado real del controlador
+│   └── esperar_refresh.sh     # pipeline: comprueba la estabilización en el proveedor
 ├── docs/plan_cambio.md   # plan previo del cambio y de la recuperación (E04)
 ├── evidencias/           # registros de observación (revisados, sin secretos)
 └── .github/workflows/u2-infra.yml
@@ -51,7 +51,7 @@ Tags en todos los recursos que los admiten: `proyecto=NexoAndes`, `fase=U2`, `al
 - **State:** un único state remoto en S3 con bloqueo nativo (`use_lockfile`), fuera de Git. Se comparte porque las dos nubes se despliegan y verifican juntas desde el mismo pipeline. Si un apply de una nube fallara, el state conserva lo que sí se creó.
 - **build_ref:** el pipeline entrega los 12 primeros caracteres del SHA del commit. En Azure, `custom_data` se ignora después de crear la VM (`ignore_changes`), porque la VM se mantiene en v1 y un commit nuevo no debe reemplazarla.
 - **Health check del ALB:** `/api/check`, que responde 200 solo si la comprobación funcional pasa (metadata real e identificación del recurso). `/health` solo prueba que el proceso está vivo.
-- **Actualización:** estrategia rolling con Instance Refresh, `min_healthy_percentage = 100` y `max_healthy_percentage = 200`. Primero se lanzan las instancias nuevas (capacidad temporal) y las antiguas se retiran solo cuando las nuevas están sanas en el ALB. El detalle y la comparación con otras estrategias están en `docs/plan_cambio.md`.
+- **Actualización:** blue-green por grupo EC2 con `create_before_destroy`: cada versión del Launch Template crea un grupo nuevo en el mismo target group; Terraform espera 2 destinos sanos y luego destruye el grupo anterior. Se descartó Instance Refresh porque la política del Learner Lab niega `autoscaling:StartInstanceRefresh`. Detalle en `docs/plan_cambio.md`.
 - **Seguridad:** sin SSH en ninguna nube; IMDSv2 obligatorio en AWS; las EC2 solo aceptan tráfico desde el SG del ALB. Azure exige una clave pública administrativa, que se entrega como secreto; la clave privada nunca sale del PC del alumno.
 
 ## 4. Preparación (una vez)
@@ -78,7 +78,7 @@ Durante la actualización y la recuperación, en dos terminales (Git Bash):
 
 ```bash
 scripts/observar_http.sh http://<DNS-del-ALB> evidencias/http_v1_a_v2.csv
-scripts/observar_capacidad.sh na-u2-c50-a007-asg <ARN-target-group> evidencias/capacidad_v1_a_v2
+scripts/observar_capacidad.sh <ARN-target-group> evidencias/capacidad_v1_a_v2
 ```
 
 Arráncalos 60 s antes de aprobar el apply y detenlos 120 s después de que el job de verificación confirme la estabilización. Luego:

@@ -209,8 +209,15 @@ resource "aws_launch_template" "portal" {
   tags = { Name = "${var.name_prefix}-lt" }
 }
 
+# Reemplazo inmutable SIN Instance Refresh: la politica (SCP) del Learner Lab
+# niega autoscaling:StartInstanceRefresh (AccessDenied, explicit deny).
+# Estrategia blue-green por grupo: el nombre del ASG incluye la version del
+# Launch Template; un cambio de version crea un ASG NUEVO (create_before_destroy)
+# en el mismo target group, Terraform espera min_elb_capacity destinos sanos y
+# recien entonces destruye el ASG anterior (drenaje de 30 s en el ALB).
+# Controlador unico: Terraform (pipeline u2-infra).
 resource "aws_autoscaling_group" "portal" {
-  name                      = "${var.name_prefix}-asg"
+  name                      = "${var.name_prefix}-asg-lt${aws_launch_template.portal.latest_version}"
   min_size                  = var.capacity
   max_size                  = var.capacity
   desired_capacity          = var.capacity
@@ -219,27 +226,15 @@ resource "aws_autoscaling_group" "portal" {
   health_check_type         = "ELB"
   health_check_grace_period = 120
   min_elb_capacity          = var.capacity
-  wait_for_capacity_timeout = "10m"
+  wait_for_capacity_timeout = "15m"
 
   launch_template {
     id      = aws_launch_template.portal.id
     version = aws_launch_template.portal.latest_version
   }
 
-  # Una nueva version del Launch Template inicia un Instance Refresh.
-  # min 100 % / max 200 %: primero lanza las instancias nuevas
-  # (capacidad temporal) y solo retira las antiguas cuando las nuevas
-  # estan sanas en el ALB. Terraform NO espera el termino del refresh:
-  # el pipeline lo comprueba con scripts/esperar_refresh.sh.
-  instance_refresh {
-    strategy = "Rolling"
-    preferences {
-      min_healthy_percentage = 100
-      max_healthy_percentage = 200
-      instance_warmup        = 60
-      skip_matching          = false
-      auto_rollback          = false
-    }
+  lifecycle {
+    create_before_destroy = true
   }
 
   # El ASG no recibe default_tags: se etiqueta aqui. Las instancias ya

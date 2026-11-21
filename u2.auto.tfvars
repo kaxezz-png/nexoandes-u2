@@ -17,3 +17,4 @@ azure_location = "brazilsouth"
 # Despues del primer despliegue, copia aqui el AMI que muestra
 # `terraform output aws` para que la version de retorno sea reproducible.
 aws_ami_id = "ami-012cadcb0ec2f554f"
+azure_vm_size  = "Standard_D2s_v4" # Standard_B1s sin capacidad en brazilsouth
