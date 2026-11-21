@@ -16,4 +16,4 @@ azure_location = "eastus"
 
 # Despues del primer despliegue, copia aqui el AMI que muestra
 # `terraform output aws` para que la version de retorno sea reproducible.
-# aws_ami_id = "ami-xxxxxxxxxxxxxxxxx"
+aws_ami_id = "ami-012cadcb0ec2f554f"
