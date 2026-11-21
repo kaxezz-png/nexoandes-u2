@@ -1,16 +1,18 @@
 # Plan de cambio y recuperación · AWS (E04)
 
-> Borrador: completa los campos `<...>` con tus valores reales y deja este archivo commiteado **antes** de ejecutar el cambio. El commit con hora es la prueba de que el plan es previo.
+> Plan declarado y commiteado **antes** de ejecutar el cambio v1 → v2 (la hora del commit lo acredita). Estado previo registrado el 2026-11-21 07:12 UTC.
 
 ## 1. Versiones y artefactos
 
 | Elemento | v1 (actual / retorno) | v2 (objetivo) |
 |---|---|---|
 | Artefacto | `templates/user_data_u2.sh.tpl` con `portal_version = v1` (perfil `basic`) | misma plantilla con `portal_version = v2` (perfil `extended`) |
-| Commit (build_ref) | `<sha-v1>` | `<sha-v2>` |
-| Launch Template | `na-u2-c50-a007-lt` versión `<n>` | versión `<n+1>` (la crea el apply) |
-| AMI | `<ami-id fijado en u2.auto.tfvars>` | la misma |
-| SHA-256 del artefacto (Portal) | `<hash v1>` | `<hash v2>` |
+| Commit (build_ref) | `fc6dd14623f0` (pipeline #6) | el commit que cambia `app_version` a `v2` |
+| Launch Template | `na-u2-c50-a007-lt` versión `3` | versión `4` (la crea el apply) |
+| AMI | `ami-012cadcb0ec2f554f` (Ubuntu 22.04, fijada en u2.auto.tfvars) | la misma |
+| SHA-256 del artefacto (Portal) | `82f7e3a976f7ec7b46f739244e44e47b59a73aa840e0269870d3b0f42e1fd7fa` | distinto (perfil `extended`), se registra después del cambio |
+| Grupo EC2 activo | `na-u2-c50-a007-asg-lt3`: `i-009f97073ffac58d9`, `i-027d0dd51fad1ff83` | `na-u2-c50-a007-asg-lt4` con 2 instancias nuevas |
+| Endpoint (no cambia) | `http://na-u2-c50-a007-alb-1049577402.us-east-1.elb.amazonaws.com` | el mismo |
 
 **Inmutabilidad:** las instancias no se modifican. Cada versión es una nueva versión del Launch Template y el ASG reemplaza las instancias completas. **Persistencia:** el Portal no guarda datos de negocio; la caché de metadata vive en memoria y se pierde al reemplazar, lo cual es esperado. El disco de cada instancia es descartable.
 
@@ -74,4 +76,4 @@ Se acepta el cambio si se cumplen **todas**:
 
 ## 8. Autorización
 
-El plan de Terraform de cada operación se revisa y se aprueba en el environment `u2-aprobacion` de GitHub Actions. La aprobación corresponde al commit `<sha>`, a `u2.auto.tfvars` de ese commit y al contexto AWS `us-east-1`.
+El plan de Terraform de cada operación se revisa y se aprueba en el environment `u2-aprobacion` de GitHub Actions. La aprobación corresponde al commit que muestra el resumen del plan, a `u2.auto.tfvars` de ese commit y al contexto AWS `us-east-1`.
