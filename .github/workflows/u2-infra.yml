@@ -1,6 +1,12 @@
 # Pipeline de infraestructura U2 (AWS + Azure).
 # controles -> plan -> autorizacion (environment con revisor) -> apply -> verificacion
-# Se ejecuta a mano (workflow_dispatch) sobre el commit elegido; ese SHA es el build_ref.
+#
+# Se ejecuta en un RUNNER AUTOALOJADO (el PC del alumno, Windows + Git Bash):
+# el tenant Azure del instituto no permite crear service principals, asi que
+# el pipeline usa la sesion `az login` del alumno y el perfil AWS local del
+# Learner Lab. No hay credenciales de nube guardadas en GitHub.
+# Solo se dispara a mano (workflow_dispatch): nadie sin permiso de escritura
+# puede ejecutarlo en el runner.
 
 name: u2-infra
 
@@ -20,33 +26,31 @@ concurrency:
   group: u2-infra # un solo pipeline a la vez sobre el mismo state
   cancel-in-progress: false
 
+defaults:
+  run:
+    shell: bash
+
 env:
-  TF_VERSION: "1.10.5"
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
-  # Contexto AWS (credenciales temporales del laboratorio)
-  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
   AWS_REGION: us-east-1
-  # Contexto Azure (service principal)
-  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-  # Variables que no se versionan
-  TF_VAR_azure_admin_ssh_public_key: ${{ secrets.AZURE_ADMIN_SSH_PUBLIC_KEY }}
-  TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+  AWS_DEFAULT_REGION: us-east-1
+  ARM_SUBSCRIPTION_ID: ${{ vars.ARM_SUBSCRIPTION_ID }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
 
 jobs:
   controles:
     name: 1. Controles
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows]
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
+      - name: Versiones y contexto
+        run: |
+          terraform version
+          aws --version
+          az version --query '"azure-cli"' -o tsv
+          echo "AWS: $(aws sts get-caller-identity --query Arn --output text | sed 's/[0-9]\{12\}/************/')"
+          echo "Azure: $(az account show --query name -o tsv)"
       - name: Formato
         run: terraform fmt -check -recursive
       - name: Validacion
@@ -67,33 +71,26 @@ jobs:
   plan:
     name: 2. Plan
     needs: controles
-    runs-on: ubuntu-latest
-    outputs:
-      build_ref: ${{ steps.ref.outputs.build_ref }}
+    runs-on: [self-hosted, Windows]
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-      - id: ref
-        name: build_ref = SHA del commit
-        run: echo "build_ref=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
       - name: Init con backend remoto
         run: |
-          terraform init \
+          terraform init -reconfigure \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="key=nexoandes-u2/terraform.tfstate" \
             -backend-config="region=${AWS_REGION}" \
             -backend-config="use_lockfile=true"
       - name: Plan
-        env:
-          TF_VAR_build_ref: ${{ steps.ref.outputs.build_ref }}
         run: |
+          export TF_VAR_build_ref="${GITHUB_SHA::12}"
+          export TF_VAR_azure_admin_ssh_public_key="$(cat ~/.ssh/nexoandes_u2.pub)"
           MODO=""
           [ "${{ inputs.operacion }}" = "destroy" ] && MODO="-destroy"
           terraform plan $MODO -out=tfplan -no-color | tee plan.txt
           {
             echo "## Plan (${{ inputs.operacion }}) - commit ${GITHUB_SHA::12}"
+            echo "Hora UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo '```'
             grep -E '^(Plan:|No changes|  # )' plan.txt || true
             echo '```'
@@ -110,22 +107,18 @@ jobs:
     name: 3. Autorizacion y apply
     if: inputs.operacion != 'plan'
     needs: plan
-    runs-on: ubuntu-latest
-    # El environment "u2-aprobacion" debe tener "Required reviewers" (tu usuario).
-    # El job queda detenido hasta que apruebes el plan revisado.
+    runs-on: [self-hosted, Windows]
+    # El environment "u2-aprobacion" tiene "Required reviewers".
+    # El job queda detenido hasta que se apruebe el plan revisado.
     environment: u2-aprobacion
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          terraform_wrapper: false
       - uses: actions/download-artifact@v4
         with:
           name: tfplan
       - name: Init con backend remoto
         run: |
-          terraform init \
+          terraform init -reconfigure \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="key=nexoandes-u2/terraform.tfstate" \
             -backend-config="region=${AWS_REGION}" \
@@ -138,50 +131,43 @@ jobs:
       - name: Outputs
         if: inputs.operacion == 'apply'
         run: |
-          terraform output -json > outputs.json
-          { echo '## Outputs'; echo '```json'; cat outputs.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        if: inputs.operacion == 'apply'
-        with:
-          name: outputs
-          path: outputs.json
+          terraform output -no-color | tee outputs.txt
+          { echo '## Outputs'; echo '```'; cat outputs.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   verificacion:
     name: 4. Verificacion independiente
     if: inputs.operacion == 'apply'
     needs: apply
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: outputs
-      - name: AWS - esperar al controlador y comprobar version, capacidad y destinos
+      - name: Leer outputs del state
         run: |
-          ASG=$(jq -r '.aws.value.asg_name' outputs.json)
-          TG=$(jq -r '.aws.value.target_group_arn' outputs.json)
-          URL=$(jq -r '.aws.value.endpoint' outputs.json)
-          LTV=$(jq -r '.aws.value.launch_template_version' outputs.json)
-          VER=$(jq -r '.identidad.value.version_aws' outputs.json)
-          bash scripts/esperar_refresh.sh "$ASG" "$TG" "$URL" "$VER" "$LTV"
+          terraform init -reconfigure \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=nexoandes-u2/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="use_lockfile=true" > /dev/null
+          for o in aws_endpoint aws_asg_name aws_target_group_arn aws_launch_template_version aws_app_version azure_endpoint azure_resource_group azure_vm_name; do
+            echo "$o=$(terraform output -raw $o)" >> "$GITHUB_ENV"
+          done
+      - name: AWS - esperar al controlador y comprobar version, capacidad y destinos
+        run: bash scripts/esperar_refresh.sh "$aws_asg_name" "$aws_target_group_arn" "$aws_endpoint" "$aws_app_version" "$aws_launch_template_version"
       - name: AWS - consulta independiente de instancias por tag
         run: |
           aws ec2 describe-instances \
-            --filters "Name=tag:alumno,Values=$(jq -r '.identidad.value.alumno' outputs.json)" "Name=instance-state-name,Values=pending,running" \
+            --filters "Name=tag:alumno,Values=a007" "Name=instance-state-name,Values=pending,running" \
             --query 'Reservations[].Instances[].[InstanceId,Placement.AvailabilityZone,PrivateIpAddress,Tags[?Key==`portal_version`]|[0].Value,Tags[?Key==`build_ref`]|[0].Value,LaunchTime]' \
             --output table
       - name: Azure - consulta independiente y prueba HTTP
         run: |
-          RG=$(jq -r '.azure.value.resource_group' outputs.json)
-          VM=$(jq -r '.azure.value.vm_name' outputs.json)
-          URL=$(jq -r '.azure.value.endpoint' outputs.json)
-          az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
-          az account set --subscription "$ARM_SUBSCRIPTION_ID"
-          az vm show -d -g "$RG" -n "$VM" --query '{nombre:name,vmId:vmId,ubicacion:location,estado:powerState,ipPrivada:privateIps,ipPublica:publicIps,tags:tags}' -o json
+          az vm show -d -g "$azure_resource_group" -n "$azure_vm_name" \
+            --query '{nombre:name,vmId:vmId,ubicacion:location,estado:powerState,ipPrivada:privateIps,ipPublica:publicIps,tags:tags}' -o json
+          code=000
           for i in $(seq 1 30); do
-            code=$(curl -sS --max-time 5 -o azure.json -w '%{http_code}' "$URL/api/check" || echo 000)
+            code=$(curl -sS --max-time 5 -o azure.json -w '%{http_code}' "$azure_endpoint/api/check" || echo 000)
             [ "$code" = "200" ] && break
-            echo "Azure aun no responde 200 (HTTP $code), reintento de espera $i/30"; sleep 10
+            echo "Azure aun no responde 200 (HTTP $code), espera $i/30"; sleep 10
           done
           cat azure.json; echo
           [ "$code" = "200" ] && grep -q '"version": "v1"' azure.json

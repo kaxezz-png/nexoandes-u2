@@ -48,3 +48,36 @@ output "azure" {
     private_ip     = module.portal_azure.private_ip
   }
 }
+
+# Salidas simples (texto) para que el pipeline las lea con `terraform output -raw`.
+output "aws_endpoint" {
+  value = "http://${module.portal_aws.alb_dns_name}"
+}
+
+output "aws_asg_name" {
+  value = module.portal_aws.asg_name
+}
+
+output "aws_target_group_arn" {
+  value = module.portal_aws.target_group_arn
+}
+
+output "aws_launch_template_version" {
+  value = tostring(module.portal_aws.launch_template_version)
+}
+
+output "aws_app_version" {
+  value = var.app_version
+}
+
+output "azure_endpoint" {
+  value = "http://${module.portal_azure.public_ip}"
+}
+
+output "azure_resource_group" {
+  value = module.portal_azure.resource_group_name
+}
+
+output "azure_vm_name" {
+  value = module.portal_azure.vm_name
+}
