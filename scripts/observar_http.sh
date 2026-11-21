@@ -10,6 +10,7 @@
 # Detener con Ctrl+C. El archivo queda completo, con todos los fallos.
 
 set -u
+export TZ=UTC
 
 ENDPOINT="${1:?Uso: $0 http://<endpoint> [archivo.csv]}"
 ENDPOINT="${ENDPOINT%/}"
@@ -57,15 +58,24 @@ trap terminar INT TERM
 echo "Observando $ENDPOINT/api/check cada ${INTERVALO} s (timeout ${TIMEOUT} s). Registro: $OUT"
 echo "Inicio del registro (UTC): $(date -u +%Y-%m-%dT%H:%M:%SZ). Ctrl+C para detener."
 
-inicio="$(date +%s.%N)"
+# Reloj sin procesos externos (builtins de bash 5): en Windows/Git Bash cada
+# proceso extra cuesta milisegundos y atrasaria la cadencia de 2 s.
+inicio_us=${EPOCHREALTIME/[.,]/}
 seq=0
 while true; do
-  objetivo="$(awk -v i="$inicio" -v n="$seq" -v p="$INTERVALO" 'BEGIN{printf "%.3f", i + n*p}')"
-  espera="$(awk -v o="$objetivo" -v a="$(date +%s.%N)" 'BEGIN{d=o-a; if(d<0)d=0; printf "%.3f", d}')"
-  sleep "$espera"
-  muestra "$seq" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" "$(date +%s.%3N)" &
+  objetivo_us=$(( inicio_us + seq * INTERVALO * 1000000 ))
+  ahora_us=${EPOCHREALTIME/[.,]/}
+  espera_us=$(( objetivo_us - ahora_us ))
+  if [ "$espera_us" -gt 0 ]; then
+    printf -v espera '%d.%06d' $((espera_us / 1000000)) $((espera_us % 1000000))
+    sleep "$espera"
+  fi
+  e=${EPOCHREALTIME/[.,]/}
+  printf -v enviado_utc '%(%Y-%m-%dT%H:%M:%S)T.%03dZ' $((e / 1000000)) $(((e % 1000000) / 1000))
+  printf -v enviado_epoch '%d.%03d' $((e / 1000000)) $(((e % 1000000) / 1000))
+  muestra "$seq" "$enviado_utc" "$enviado_epoch" &
   if [ $((seq % 15)) -eq 0 ]; then
-    echo "  $(date -u +%H:%M:%SZ) muestra #$seq enviada"
+    echo "  ${enviado_utc:11:8}Z muestra #$seq enviada"
   fi
   seq=$((seq + 1))
 done
