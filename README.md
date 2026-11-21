@@ -47,7 +47,7 @@ Tags en todos los recursos que los admiten: `proyecto=NexoAndes`, `fase=U2`, `al
 ## 3. Decisiones técnicas
 
 - **Orquestación:** un root module con dos módulos hijos, uno por proveedor. Los parámetros comunes (identidad, build, versión) se resuelven una vez en `locals`; los específicos viven en cada módulo.
-- **Contextos y credenciales:** AWS usa las credenciales temporales del laboratorio y Azure un service principal, ambos como secretos de GitHub Actions. No hay credenciales en el código.
+- **Contextos y credenciales:** el pipeline de GitHub Actions corre en un **runner autoalojado** (el PC del alumno). AWS usa el perfil local con las credenciales temporales del Learner Lab y Azure la sesión de Azure CLI (`az login`) del alumno. Motivo: el tenant de Azure del instituto no permite registrar service principals (`Insufficient privileges`), por lo que no es posible autenticar un runner alojado por GitHub. No hay credenciales de nube en GitHub ni en el código.
 - **State:** un único state remoto en S3 con bloqueo nativo (`use_lockfile`), fuera de Git. Se comparte porque las dos nubes se despliegan y verifican juntas desde el mismo pipeline. Si un apply de una nube fallara, el state conserva lo que sí se creó.
 - **build_ref:** el pipeline entrega los 12 primeros caracteres del SHA del commit. En Azure, `custom_data` se ignora después de crear la VM (`ignore_changes`), porque la VM se mantiene en v1 y un commit nuevo no debe reemplazarla.
 - **Health check del ALB:** `/api/check`, que responde 200 solo si la comprobación funcional pasa (metadata real e identificación del recurso). `/health` solo prueba que el proceso está vivo.
@@ -56,15 +56,12 @@ Tags en todos los recursos que los admiten: `proyecto=NexoAndes`, `fase=U2`, `al
 
 ## 4. Preparación (una vez)
 
-1. Crea un bucket S3 para el state en la cuenta del laboratorio (nombre único, ej. `na-u2-c50-a007-tfstate-<algo>`), con versionado y sin acceso público.
-2. Genera la clave SSH que exige Azure: `ssh-keygen -t ed25519 -f ~/.ssh/nexoandes_u2` (solo se usa la `.pub`).
-3. Crea el service principal de Azure:
-   `az ad sp create-for-rbac --name na-u2-c50-a007-sp --role Contributor --scopes /subscriptions/<ID-suscripcion>`
-4. En GitHub → *Settings → Secrets and variables → Actions*, crea los secretos:
-   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, `AZURE_ADMIN_SSH_PUBLIC_KEY` y `TF_STATE_BUCKET`.
-5. En *Settings → Environments*, crea `u2-aprobacion` con *Required reviewers* (tu usuario). Ese es el gate de autorización del plan.
-
-Las credenciales del laboratorio AWS caducan en cada sesión: actualiza los tres secretos de AWS antes de ejecutar el pipeline.
+1. Bucket S3 para el state, con versionado y sin acceso público: `na-u2-c50-a007-tfstate-7391`.
+2. Clave SSH que exige Azure: `ssh-keygen -t ed25519 -f ~/.ssh/nexoandes_u2` (solo se usa la `.pub`; la privada no sale del PC).
+3. En GitHub → *Settings → Secrets and variables → Actions → Variables*: `ARM_SUBSCRIPTION_ID` y `TF_STATE_BUCKET` (no son secretos).
+4. En *Settings → Environments*: `u2-aprobacion` con *Required reviewers*. Es el gate de autorización del plan.
+5. En *Settings → Actions → Runners*: registrar el runner autoalojado de Windows y ejecutarlo con `run.cmd` en la sesión del alumno.
+6. Antes de cada sesión: credenciales nuevas del Learner Lab en `~/.aws/credentials` y `az login` vigente.
 
 ## 5. Ejecución
 
