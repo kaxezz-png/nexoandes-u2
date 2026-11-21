@@ -1,0 +1,9 @@
+# La plantilla y los scripts se ejecutan en Linux: deben quedar con LF
+# aunque el repositorio se clone en Windows.
+* text=auto
+*.tpl  text eol=lf
+*.sh   text eol=lf
+*.tf   text eol=lf
+*.tfvars text eol=lf
+*.yml  text eol=lf
+*.hcl  text eol=lf

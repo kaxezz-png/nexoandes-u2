@@ -1,0 +1,32 @@
+# Terraform: state, planes y caches NUNCA se versionan
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.txt
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+outputs.json
+
+# Variables locales con datos privados (u2.auto.tfvars SI se versiona)
+*.tfvars
+!u2.auto.tfvars
+secret*.tfvars
+
+# Credenciales y claves
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.env
+*.publishsettings
+credentials*
+
+# Sistema
+.DS_Store
+Thumbs.db
