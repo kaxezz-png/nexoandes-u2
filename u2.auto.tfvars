@@ -9,7 +9,7 @@ course = "c50" # CONFIRMAR con el docente (el ejemplo de la guia usa c01)
 #   v1 -> despliegue inicial (E03)
 #   v2 -> actualizacion inmutable (E05)
 #   v1 -> recuperacion / reversion planificada (E07)
-app_version = "v2"
+app_version = "v1"
 
 aws_region     = "us-east-1"
 azure_location = "brazilsouth"
