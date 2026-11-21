@@ -12,7 +12,7 @@ course = "c50" # CONFIRMAR con el docente (el ejemplo de la guia usa c01)
 app_version = "v1"
 
 aws_region     = "us-east-1"
-azure_location = "eastus"
+azure_location = "brazilsouth"
 
 # Despues del primer despliegue, copia aqui el AMI que muestra
 # `terraform output aws` para que la version de retorno sea reproducible.
